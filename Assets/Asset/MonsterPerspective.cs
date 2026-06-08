@@ -1,11 +1,12 @@
+using System.Collections.Generic;
 using UnityEngine;
 
-public class MonsterStateGizmo : MonoBehaviour
+public class Monsterperspective : MonoBehaviour
 {
     private enum MonsterState
     {
-        Idle,//대기
-        detect,//발견
+        Patrol,//대기
+        Detect,//발견
         Chase,//추적
         Attack//공격
     }
@@ -16,10 +17,10 @@ public class MonsterStateGizmo : MonoBehaviour
 
     [Header("Distance")]
     [Tooltip("몬스터가 타겟을 감지할수 있는 범위")]
-    [SerializeField] private float idleDistance = 0f;
-    [SerializeField] private float detectDistance = 10f;
-    [SerializeField] private float chaseDistance = 6f;
-    [SerializeField] private float attackDistance = 1.8f;
+    [SerializeField] private float PatrolDistance = 0f;
+    [SerializeField] private float DetectDistance = 10f;
+    [SerializeField] private float ChaseDistance = 6f;
+    [SerializeField] private float AttackDistance = 3f;
 
     [Header("View")]
     [SerializeField] private float viewAngle = 90f;
@@ -35,13 +36,22 @@ public class MonsterStateGizmo : MonoBehaviour
     [Tooltip("몬스터의 이동 속도")]
     [SerializeField] private float moveSpeed = 2f;
 
-    private MonsterState currentState = MonsterState.Idle;
+    [SerializeField] private LayerMask obstacleMask;
+
+    private MonsterState currentState = MonsterState.Patrol;
+
+    [SerializeField] private List<Vector3> patrolPoints = new();
+
+    [SerializeField] private float arriveDistance = 0.2f;
+
+    private int currentIndex = 0;
 
     private void Update()
     {
         if (player == null)//플레이어 없으면
         {
-            currentState = MonsterState.Idle;
+            currentState = MonsterState.Patrol;
+            Patrol();
             return;
         }
 
@@ -49,18 +59,16 @@ public class MonsterStateGizmo : MonoBehaviour
 
         bool canSeePlayer = CanSeePlayer();
 
-        if (!canSeePlayer)
-        {
-            currentState = MonsterState.Idle;
-            return;
-        }
-        if (distance <= attackDistance)//공격 상태일 때
+        if (distance <= AttackDistance && canSeePlayer)//공격 상태일 때
         {
             currentState = MonsterState.Attack;
 
             RotateToPlayer();
-        }
-        else if (distance <= chaseDistance)//추적 상태일 때
+
+            return;
+        }        
+
+        else if (distance <= ChaseDistance && canSeePlayer)//추적 상태일 때
         {
             currentState = MonsterState.Chase;
 
@@ -68,13 +76,12 @@ public class MonsterStateGizmo : MonoBehaviour
 
             RotateToPlayer();
 
-            transform.position = Vector3.MoveTowards(
-                transform.position,
-                player.position,
-                moveSpeed * Time.deltaTime
-            );
+            transform.position = Vector3.MoveTowards(transform.position, player.position, moveSpeed * Time.deltaTime);
+
+            return;
         }
-        else if (distance <= detectDistance)//발견 상태일 때
+
+        else if (distance <= DetectDistance && canSeePlayer)//발견 상태일 때
         {
             RotateToPlayer();
 
@@ -84,21 +91,50 @@ public class MonsterStateGizmo : MonoBehaviour
             {
                 currentState = MonsterState.Chase;//추적 상태로 변경
 
-                transform.position = Vector3.MoveTowards(
-                    transform.position,
-                    player.position,
-                    moveSpeed * Time.deltaTime
-                );
+                transform.position = Vector3.MoveTowards(transform.position, player.position, moveSpeed * Time.deltaTime);
             }
             else//설정 시간보다 짧으면
             {
-                currentState = MonsterState.detect;//발견 상태 유지
+                currentState = MonsterState.Detect;//발견 상태 유지
             }
         }
+
         else//그 외
         {
             detectTimer = 0f;//발견 시간을 0으로 초기화
-            currentState = MonsterState.Idle;
+            currentState = MonsterState.Patrol;
+            Patrol();
+        }
+    }
+
+    private void Patrol()
+    {
+        if (patrolPoints.Count == 0)
+            return;
+
+        Vector3 targetPos = patrolPoints[currentIndex];
+
+        // 이동
+        transform.position = Vector3.MoveTowards(transform.position, targetPos, moveSpeed * Time.deltaTime);
+
+        // 회전
+        Vector3 direction = targetPos - transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude > 0.001f)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotateSpeed * Time.deltaTime);
+        }
+
+        // 도착 판정
+        if ((transform.position - targetPos).sqrMagnitude <= arriveDistance * arriveDistance)
+        {
+            currentIndex++;
+
+            if (currentIndex >= patrolPoints.Count)
+                currentIndex = 0;
         }
     }
 
@@ -110,32 +146,25 @@ public class MonsterStateGizmo : MonoBehaviour
         Vector3 origin = transform.position + Vector3.up * 0.5f;
         Vector3 target = player.position + Vector3.up * 0.5f;
 
-        Vector3 directionToPlayer =
-            (target - origin).normalized;
+        Vector3 direction = (target - origin);
+        float distance = direction.magnitude;
+        direction /= distance;
 
-        float distance =
-            Vector3.Distance(origin, target);
+        if (distance > DetectDistance)
+            return false;
 
-        // 내적 계산
-        float dot = Vector3.Dot(
-            transform.forward,
-            directionToPlayer
-        );
-
-        // 시야각 절반 기준
+        float dot = Vector3.Dot(transform.forward, direction);
         float limit = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
 
         if (dot < limit)
             return false;
 
-        // 벽에 가려졌는지 확인
-        if (Physics.Raycast(origin, directionToPlayer,
-            out RaycastHit hit, distance))
+        if (Physics.Raycast(origin, direction, distance, obstacleMask))
         {
-            return hit.transform == player;
+            return false;
         }
 
-        return false;
+        return true;
     }
 
     private void RotateToPlayer()
@@ -160,13 +189,13 @@ public class MonsterStateGizmo : MonoBehaviour
         Gizmos.DrawSphere(transform.position, 0.35f);
 
         Gizmos.color = Color.green;
-        Gizmos.DrawWireSphere(transform.position, detectDistance);
+        Gizmos.DrawWireSphere(transform.position, DetectDistance);
 
         Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, chaseDistance);
+        Gizmos.DrawWireSphere(transform.position, ChaseDistance);
 
         Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, attackDistance);
+        Gizmos.DrawWireSphere(transform.position, AttackDistance);
 
         if (player == null)
             return;
@@ -176,13 +205,13 @@ public class MonsterStateGizmo : MonoBehaviour
         float halfAngle = viewAngle * 0.5f;
         int segments = 20;
 
-        Vector3 previousPoint = transform.position + Quaternion.Euler(0, -halfAngle, 0) * transform.forward * detectDistance;
+        Vector3 previousPoint = transform.position + Quaternion.Euler(0, -halfAngle, 0) * transform.forward * DetectDistance;
 
         for (int i = 1; i <= segments; i++)
         {
             float angle = Mathf.Lerp(-halfAngle, halfAngle, i / (float)segments);
 
-            Vector3 currentPoint = transform.position + Quaternion.Euler(0, angle, 0) * transform.forward * detectDistance;
+            Vector3 currentPoint = transform.position + Quaternion.Euler(0, angle, 0) * transform.forward * DetectDistance;
 
             Gizmos.DrawLine(previousPoint, currentPoint);
             previousPoint = currentPoint;
@@ -192,9 +221,9 @@ public class MonsterStateGizmo : MonoBehaviour
 
         Vector3 rightBoundary = Quaternion.Euler(0, halfAngle, 0) * transform.forward;
 
-        Gizmos.DrawRay(transform.position, leftBoundary * detectDistance);
+        Gizmos.DrawRay(transform.position, leftBoundary * DetectDistance);
 
-        Gizmos.DrawRay(transform.position, rightBoundary * detectDistance);
+        Gizmos.DrawRay(transform.position, rightBoundary * DetectDistance);
 
         Gizmos.color = Color.white;
         Gizmos.DrawLine(transform.position, player.position);
@@ -204,7 +233,7 @@ public class MonsterStateGizmo : MonoBehaviour
     {
         switch (currentState)
         {
-            case MonsterState.detect://발견
+            case MonsterState.Detect://발견
                 return Color.green;
             case MonsterState.Chase://추적
                 return Color.yellow;
