@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class MonsterMovement : MonoBehaviour
+public class Monsterperspective : MonoBehaviour
 {
     private enum MonsterState
     {
@@ -12,7 +12,7 @@ public class MonsterMovement : MonoBehaviour
     }
 
     [Header("Target")]
-    [Tooltip("¸ó½ºÅÍ°¡ ÂÑÀ» Å¸°Ù")]
+    [Tooltip("ÇØ´ç ¸ó½ºÅÍ°¡ ÂÑÀ» Å¸°Ù")]
     [SerializeField] private Transform player;
 
     [Header("Distance")]
